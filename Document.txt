@@ -1,0 +1,11 @@
+**Database Migration Specialist**
+- Led the planning and execution of multiple on-premises database migration projects to AWS RDS, ensuring minimal downtime and maintaining data integrity.
+- Provisioned and configured AWS RDS instances (MySQL, PostgreSQL, SQL Server), including VPC setup, security group configurations, and parameter tuning.
+- Utilized AWS Schema Conversion Tool (SCT) and AWS Database Migration Service (DMS) for efficient schema conversion and data migration.
+- Conducted performance tuning and optimization of AWS RDS instances post-migration, achieving up to 30% improvement in query performance.
+- Implemented security best practices, including encryption, IAM roles, and security group configurations, ensuring compliance with organizational security policies.
+- Set up monitoring solutions using Amazon CloudWatch and AWS RDS Performance Insights, proactively resolving performance issues and ensuring optimal operation.
+- Configured automated backups, snapshots, and multi-AZ deployments to guarantee high availability and disaster recovery.
+- Coordinated with cross-functional teams and stakeholders to ensure smooth migration processes and address concerns promptly.
+- Documented migration procedures, best practices, and provided training to team members on managing and optimizing AWS RDS environments.
+- Managed end-to-end database migration projects, including timeline creation, resource allocation, risk management, and progress reporting to senior management.
