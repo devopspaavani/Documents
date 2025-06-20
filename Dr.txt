@@ -1,0 +1,98 @@
+A Disaster Recovery (DR) Plan Test for Morpheus (Morpheus Data – the cloud management platform) ensures your platform can be recovered in the event of a failure or disaster scenario (like region outage, database corruption, VM crash, etc.). Below is a detailed Disaster Recovery Plan Test tailored for Morpheus, with checklist, procedures, and validation tasks.
+
+✅ Objectives of DR Testing for Morpheus
+	•	Validate recovery of Morpheus UI and APIs.
+	•	Restore functionality of provisioning, cloud integrations, and automation workflows.
+	•	Confirm backup strategy is effective (e.g., database and configuration).
+	•	Ensure dependent systems (like databases, external integrations, logging, LDAP, etc.) also recover correctly.
+	•	Meet RPO (Recovery Point Objective) and RTO (Recovery Time Objective) goals.
+
+🔁 DR Test Types
+
+Type	Description
+Tabletop Test	Walkthrough of DR plan with stakeholders without executing
+Simulation Test	Simulate failover in a sandbox environment
+Cutover Test	Actual failover to DR infrastructure and running operations there
+Backup Restore Test	Validate backup restoration of PostgreSQL DB and Morpheus config
+
+📋 DR Test Plan for Morpheus
+
+1. Pre-Check: Inventory and Setup
+	•	✅ Identify Morpheus primary node(s), DB server(s), and configuration directory (/etc/morpheus, /opt/morpheus).
+	•	✅ List all cloud integrations, provisioning templates, automation scripts, roles, policies.
+	•	✅ Define backup frequency (daily/weekly) and storage (e.g., S3, NFS, Azure Blob).
+	•	✅ Confirm DR environment or standby infrastructure is available.
+
+2. Backup Validation
+	•	⬜ Trigger and verify backup of:
+	•	PostgreSQL database (morpheus DB)
+	•	Morpheus configuration files
+	•	Custom scripts, templates, SSL certs
+	•	⬜ Store backup artifacts securely and confirm encryption/integrity.
+	•	⬜ Document backup file paths and restore commands.
+
+Sample PostgreSQL DB backup:
+
+pg_dump -U morpheus -Fc morpheus > /backup/morpheus_backup_$(date +%F).dump
+
+3. Simulated Recovery Steps
+	•	⬜ Shut down production Morpheus services (simulation or on sandbox).
+	•	⬜ Provision DR Morpheus VM using latest backup.
+	•	⬜ Restore database:
+
+pg_restore -U morpheus -d morpheus /backup/morpheus_backup_2025-06-20.dump
+
+	•	⬜ Restore config:
+
+cp -r /backup/etc/morpheus /etc/
+cp -r /backup/opt/morpheus /opt/
+
+	•	⬜ Restart Morpheus services:
+
+systemctl restart morpheus-ui
+
+	•	⬜ Verify service is reachable on UI and API endpoint.
+
+4. Validation Checklist
+
+Test	Expected Outcome
+Login to Morpheus	UI/SSO/LDAP works
+Check cloud integrations	AWS/Azure/GCP clouds visible
+Provision VM/Test Blueprint	Successful provisioning
+Automation tasks	Scheduled jobs and Ansible/Script executions
+Reporting/Logs	Audit logs and syslogs are restored
+RBAC	Role-based access permissions intact
+Integrations	LDAP, SMTP, logging, CMDB, DNS
+Webhooks/API Tokens	Valid and working
+
+5. Failover/Cutover Testing (Optional)
+
+If DR infra is in another region/site:
+	•	⬜ Switch DNS entry or load balancer to point to DR instance.
+	•	⬜ Inform test group for functional validation.
+	•	⬜ Monitor performance and logs.
+
+6. Post-Test Tasks
+	•	✅ Generate DR test report
+	•	✅ Capture logs, screenshots, issues
+	•	✅ Document test time, RTO/RPO met
+	•	✅ Restore production setup if cutover was performed
+	•	✅ Review and improve gaps in DR plan
+
+🧾 Sample DR Test Report Template (Summary)
+
+Item	Status	Notes
+Backup Availability	✅	Daily backup taken
+DB Restore	✅	Completed in 4 minutes
+Morpheus UI Recovery	✅	Login and test blueprint successful
+LDAP/SSO	❌	LDAP sync failed, fixed during test
+Automation Tests	✅	Ansible and scripts restored
+
+🛠️ Tools Involved
+	•	pg_dump, pg_restore – for DB
+	•	rsync or tar – for file backup
+	•	S3/Azure Blob/NFS – for offsite storage
+	•	Jenkins/Ansible – for automated DR runbooks
+	•	Prometheus/Grafana/Datadog – for health validation (optional)
+
+Would you like a Bash script or Ansible playbook to automate this DR test?
