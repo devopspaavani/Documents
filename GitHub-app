@@ -1,0 +1,120 @@
+name: Terraform PR Checks (via GitHub App)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [ main, master, develop, dev ]
+  workflow_dispatch:
+
+# Least-privilege: these are for the *job*; we'll mint a GitHub App token anyway.
+permissions:
+  contents: read
+  pull-requests: write     # to post/update PR comments
+  checks: write            # to publish check runs (optional)
+
+concurrency:
+  group: tf-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_ROOT: infra           # <--- change to your Terraform root dir (or use a matrix)
+  TF_VERSION: 1.8.5        # set your required Terraform version
+  # If you use terraform cloud/remote backends or providers that need creds,
+  # wire them as secrets and export here (or use OIDC as needed).
+
+jobs:
+  terraform-pr:
+    name: Lint • Validate • Plan • Comment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create installation token from GitHub App
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout (with App token)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Cache Terraform plugins/modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            ${{ env.TF_ROOT }}/.terraform
+          key: ${{ runner.os }}-tf-${{ hashFiles(format('{0}/**/*.tf', env.TF_ROOT)) }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', env.TF_ROOT)) }}
+          restore-keys: |
+            ${{ runner.os }}-tf-
+
+      - name: Install TFLint
+        uses: terraform-linters/setup-tflint@v5
+
+      - name: TFLint
+        working-directory: ${{ env.TF_ROOT }}
+        run: |
+          tflint --init
+          tflint --recursive
+
+      # Static analysis with tfsec; PR inline comments supported
+      - name: tfsec (PR commenter)
+        uses: aquasecurity/tfsec-pr-commenter-action@v1.3.2
+        with:
+          working_directory: ${{ env.TF_ROOT }}
+          github_token: ${{ steps.app-token.outputs.token }}
+        # Notes: Supports sticky comments & SARIF if you want. See docs.
+
+      - name: Terraform fmt (check only)
+        id: fmt
+        working-directory: ${{ env.TF_ROOT }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        id: init
+        working-directory: ${{ env.TF_ROOT }}
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        id: validate
+        working-directory: ${{ env.TF_ROOT }}
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        id: plan
+        working-directory: ${{ env.TF_ROOT }}
+        env:
+          TF_IN_AUTOMATION: "true"
+        run: |
+          terraform plan \
+            -input=false \
+            -no-color \
+            -out=tfplan.binary \
+            -lock-timeout=5m \
+            || EXIT_CODE=$?
+          terraform show -no-color tfplan.binary > tfplan.txt || true
+          echo "exit_code=${EXIT_CODE:-0}" >> $GITHUB_OUTPUT
+
+      # Rich, sticky PR comment with a nice Markdown view of the plan
+      - name: Post Plan as PR comment (structured)
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        uses: borchero/terraform-plan-comment@v2
+        with:
+          path: ${{ env.TF_ROOT }}/tfplan.txt
+          upload-artifact: true
+          token: ${{ steps.app-token.outputs.token }}
+
+      # (Optional) fail the job if plan/validate failed
+      - name: Fail if plan/validate failed
+        if: ${{ steps.plan.outputs.exit_code != '0' || failure() }}
+        run: |
+          echo "Terraform plan or a previous step failed."
+          exit 1
