@@ -118,3 +118,61 @@ jobs:
         run: |
           echo "Terraform plan or a previous step failed."
           exit 1
+
+
+
+----------/
+
+module.exports = (app) => {
+  app.on(['pull_request.opened', 'pull_request.synchronize'], async (context) => {
+    const pr   = context.payload.pull_request;
+    const owner= pr.base.repo.owner.login;
+    const repo = pr.base.repo.name;
+    const sha  = pr.head.sha;
+
+    // Create a GitHub Check Run
+    const check = await context.octokit.checks.create({
+      owner,
+      repo,
+      name: 'Terraform Plan Check',
+      head_sha: sha,
+      status: 'in_progress',
+    });
+
+    const checkId = check.data.id;
+
+    try {
+      // Run Terraform commands
+      const { execSync } = require('child_process');
+      execSync('terraform init',            { stdio: 'inherit' });
+      const plan = execSync('terraform plan -no-color', { encoding: 'utf8' });
+
+      // Success
+      await context.octokit.checks.update({
+        owner,
+        repo,
+        check_run_id: checkId,
+        conclusion: 'success',
+        output: {
+          title: 'Terraform Plan',
+          summary: 'Plan executed OK',
+          text: '```' + plan.substring(0, 65000) + '```'
+        }
+      });
+
+    } catch (err) {
+      // Failure
+      await context.octokit.checks.update({
+        owner,
+        repo,
+        check_run_id: checkId,
+        conclusion: 'failure',
+        output: {
+          title: 'Terraform Plan Failed',
+          summary: 'Plan failed',
+          text: '```\n' + err.toString() + '\n```'
+        }
+      });
+    }
+  });
+};
