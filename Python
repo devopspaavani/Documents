@@ -1,0 +1,95 @@
+import os
+import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class CodeReviewPy:
+    """Class CodeReviewPy"""
+
+    def __init__(self,
+                 git_api_url=None,
+                 jenkins_api_url=None,
+                 status=None,
+                 number=None,
+                 head=None,
+                 base=None,
+                 workdir=None,
+                 git_token=None,
+                 jenkins_username=None,
+                 jenkins_password=None):
+
+        self.git_api_url = git_api_url or os.getenv("GIT_API_URL", "https://api.github.com")
+        self.jenkins_api_url = jenkins_api_url or os.getenv("JENKINS_API_URL")
+        self.status = status or os.getenv("PR_STATUS")
+        self.number = number or os.getenv("PR_NUMBER")
+        self.head = head or os.getenv("PR_HEAD")
+        self.base = base or os.getenv("PR_BASE")
+        self.workdir = workdir or os.getenv("WORKSPACE")
+
+        self.git_token = git_token or os.getenv("GIT_TOKEN")
+        self.jenkins_username = jenkins_username or os.getenv("JENKINS_USER")
+        self.jenkins_password = jenkins_password or os.getenv("JENKINS_PASS")
+
+        # Repo (owner/repo) comes from webhook env var like "myorg/myrepo"
+        self.repo = os.getenv("PR_REPO_NAME")  # e.g. "myorg/sample-repo"
+
+        # Proxy setup if needed
+        self.http_proxy = os.getenv("HTTP_PROXY")
+        self.https_proxy = os.getenv("HTTPS_PROXY")
+        self.proxy_dict = {"http": self.http_proxy, "https": self.https_proxy}
+
+        # Results
+        self.validation_messages = []
+
+
+    def add_result(self, message, success=True):
+        """Collect validation messages"""
+        status = "✅ PASS" if success else "❌ FAIL"
+        self.validation_messages.append(f"{status}: {message}")
+
+
+    def post_pr_review(self):
+        """Post results back to GitHub PR as a review comment"""
+        if not self.repo or not self.number:
+            print("⚠️ Missing PR_REPO_NAME or PR_NUMBER, cannot post review")
+            return
+
+        url = f"{self.git_api_url}/repos/{self.repo}/pulls/{self.number}/reviews"
+        headers = {"Authorization": f"token {self.git_token}",
+                   "Accept": "application/vnd.github+json"}
+
+        # Determine review status
+        has_failures = any("❌" in msg for msg in self.validation_messages)
+        event = "REQUEST_CHANGES" if has_failures else "APPROVE"
+
+        body = "\n".join(self.validation_messages) or "Validation completed."
+
+        payload = {
+            "body": body,
+            "event": event
+        }
+
+        print(f"📡 Posting review to {url}")
+        r = requests.post(url, json=payload, headers=headers,
+                          proxies=self.proxy_dict, verify=False)
+
+        if r.status_code >= 300:
+            print(f"❌ Failed to post review: {r.status_code} {r.text}")
+        else:
+            print(f"✅ Review posted to PR #{self.number}")
+
+------------/-/-------
+
+if __name__ == "__main__":
+    cr = CodeReviewPy()
+    # Example: after validating files
+    cr.add_result("Jenkinsfile syntax check passed", success=True)
+    cr.add_result("Another Jenkinsfile has errors", success=False)
+
+    # Send results back
+    cr.post_pr_review()
+
+    # Exit with fail code if any failures
+    if any("❌" in msg for msg in cr.validation_messages):
+        exit(1)
