@@ -1,0 +1,15 @@
+def getuprofiles(self):
+    url = f"{self.git_api_url}/repos/{self.repo}/pulls/{self.pr_number}/files"
+    headers = {"Authorization": f"token {self.git_token}"}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print(f"[ERROR] GitHub API call failed: {e}")
+        print(f"URL: {url}")
+        print(f"Status code: {response.status_code}")
+        print(f"Response body: {response.text}")
+        raise   # rethrow so Jenkins still fails the build
+
+    return response.json()
