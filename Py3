@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""
+validate_pr.py
+Triggered by Jenkins Generic Webhook from a GitHub PR.
+Validates modified Python and Jenkinsfile code, then posts review feedback to GitHub.
+"""
+
+import os
+import sys
+import argparse
+import logging
+import json
+import requests
+import subprocess
+import py_compile
+from requests.auth import HTTPBasicAuth
+
+# -------------------------------------------------------------------
+# Logging Setup
+# -------------------------------------------------------------------
+def setup_logging(build_tag: str, log_dir: str):
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"{build_tag}.log")
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, mode="w"),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    logging.info("Logging initialized. Log file: %s", log_file)
+    return log_file
+
+
+# -------------------------------------------------------------------
+# Argument Parser
+# -------------------------------------------------------------------
+def get_args():
+    parser = argparse.ArgumentParser(description="Validate modified files on PR")
+    parser.add_argument("--build_tag", default=os.getenv("BUILD_TAG", "validate-pr"),
+                        help="Tag to identify this build (default: validate-pr)")
+    parser.add_argument("--py_log_dir", default=os.getenv("PY_LOG_DIR", "/tmp"),
+                        help="Directory for log file (default: /tmp)")
+    return parser.parse_args()
+
+
+# -------------------------------------------------------------------
+# Code Review Validator Class
+# -------------------------------------------------------------------
+class CodeReview:
+    def __init__(self, git_api_url, git_token, pr_number,
+                 jenkins_api_url, jenkins_username, jenkins_password, workdir):
+        self.git_api_url = git_api_url.rstrip("/")
+        self.git_token = git_token
+        self.pr_number = pr_number
+        self.jenkins_api_url = jenkins_api_url.rstrip("/")
+        self.jenkins_auth = HTTPBasicAuth(jenkins_username, jenkins_password)
+        self.workdir = workdir
+        self.github_headers = {
+            "Authorization": f"token {git_token}",
+            "Accept": "application/vnd.github+json"
+        }
+
+    # ---------------- GitHub Section ----------------
+    def _get_modified_files(self):
+        """Fetch modified files from PR."""
+        url = f"{self.git_api_url}/pulls/{self.pr_number}/files"
+        logging.info("Fetching modified files from: %s", url)
+        resp = requests.get(url, headers=self.github_headers)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Failed to fetch PR files: {resp.status_code} {resp.text}")
+
+        files = [f["filename"] for f in resp.json()]
+        logging.info("Modified files: %s", files)
+        return files
+
+    def _post_review_comment(self, comment_body):
+        """Post a single review comment on the PR."""
+        url = f"{self.git_api_url}/issues/{self.pr_number}/comments"
+        logging.info("Posting review comment to: %s", url)
+        payload = {"body": comment_body}
+        resp = requests.post(url, headers=self.github_headers, data=json.dumps(payload))
+        if resp.status_code not in [200, 201]:
+            raise RuntimeError(f"Failed to post review comment: {resp.status_code} {resp.text}")
+        logging.info("Review comment posted successfully.")
+
+    # ---------------- Python Validation ----------------
+    def _validate_python_files(self, files):
+        """Validate Python files using py_compile."""
+        failed = []
+        for file in files:
+            if not file.endswith(".py"):
+                continue
+            path = os.path.join(self.workdir, file)
+            if not os.path.exists(path):
+                logging.warning("File not found for validation: %s", path)
+                continue
+            try:
+                py_compile.compile(path, doraise=True)
+                logging.info("✅ Python syntax OK: %s", file)
+            except py_compile.PyCompileError as e:
+                logging.error("❌ Python syntax error: %s\n%s", file, str(e))
+                failed.append(file)
+        return failed
+
+    # ---------------- Jenkinsfile Validation ----------------
+    def _validate_jenkinsfiles(self, files):
+        """Validate Jenkinsfiles using Jenkins Pipeline Model Converter API."""
+        failed = []
+        for file in files:
+            if not file.lower().startswith("jenkinsfile"):
+                continue
+            path = os.path.join(self.workdir, file)
+            if not os.path.exists(path):
+                logging.warning("File not found for Jenkins validation: %s", path)
+                continue
+
+            logging.info("Validating Jenkinsfile via API: %s", file)
+            with open(path, "r") as f:
+                data = f.read()
+
+            url = f"{self.jenkins_api_url}/pipeline-model-converter/validate"
+            resp = requests.post(url, data={"jenkinsfile": data}, auth=self.jenkins_auth)
+            if resp.status_code != 200:
+                logging.error("Jenkins API validation failed for %s: %s", file, resp.text)
+                failed.append(file)
+            else:
+                result = resp.json()
+                if result.get("status") == "ok":
+                    logging.info("✅ Jenkinsfile syntax OK: %s", file)
+                else:
+                    logging.error("❌ Jenkinsfile invalid: %s\n%s", file, result)
+                    failed.append(file)
+        return failed
+
+    # ---------------- Main Validation ----------------
+    def run_validation(self):
+        """Main validation workflow."""
+        logging.info("Starting validation process...")
+        files = self._get_modified_files()
+
+        python_failed = self._validate_python_files(files)
+        jenkins_failed = self._validate_jenkinsfiles(files)
+
+        all_failed = python_failed + jenkins_failed
+        if not all_failed:
+            summary = "✅ All modified files passed validation."
+        else:
+            summary = f"❌ Validation failed for files: {', '.join(all_failed)}"
+
+        self._post_review_comment(summary)
+
+        logging.info("Validation summary: %s", summary)
+        return 0 if not all_failed else 1
+
+
+# -------------------------------------------------------------------
+# Main Entrypoint
+# -------------------------------------------------------------------
+def main():
+    args = get_args()
+    setup_logging(args.build_tag, args.py_log_dir)
+
+    try:
+        git_api_url = os.getenv("GIT_API_URL")
+        git_token = os.getenv("GIT_TOKEN")
+        pr_number = os.getenv("PR_NUMBER")
+        jenkins_api_url = os.getenv("JENKINS_API_URL")
+        jenkins_username = os.getenv("JENKINS_USERNAME")
+        jenkins_password = os.getenv("JENKINS_PASSWORD")
+        workdir = os.getenv("WORKDIR")
+
+        if not all([git_api_url, git_token, pr_number, jenkins_api_url, jenkins_username, jenkins_password, workdir]):
+            raise ValueError("Missing one or more required environment variables")
+
+        review = CodeReview(
+            git_api_url, git_token, pr_number,
+            jenkins_api_url, jenkins_username, jenkins_password, workdir
+        )
+        exit_code = review.run_validation()
+
+    except Exception as e:
+        logging.exception("Error processing input: %s", e)
+        exit_code = 1
+
+    sys.exit(exit_code)
+
+
+# -------------------------------------------------------------------
+if __name__ == "__main__":
+    main()
