@@ -1,0 +1,67 @@
+pipeline {
+  agent any
+
+  stages {
+    stage('Checkout Source') {
+      steps {
+        deleteDir()
+        git branch: "$branch_name", url: "$clone_url"
+      }
+    }
+
+    stage('Terraform Plan') {
+      steps {
+        script {
+          def repoName = "${repo_name}"
+          def cloudProvider = repoName.contains("azure") ? "azure" : "aws"
+          def environmentType = repoName.contains("prod") ? "prod" : "sandbox"
+
+          echo "📦 Repo: ${repoName}"
+          echo "☁️ Cloud Provider: ${cloudProvider.toUpperCase()}"
+          echo "🏗️ Environment: ${environmentType.toUpperCase()}"
+
+          if (cloudProvider == "azure") {
+            def creds = [
+              sp: "azure_sp_${environmentType}",
+              tenant: "azure_tenant_${environmentType}",
+              sub: "azure_subscription_${environmentType}"
+            ]
+
+            withCredentials([
+              usernamePassword(credentialsId: creds.sp, usernameVariable: 'CLIENT_ID', passwordVariable: 'CLIENT_SECRET'),
+              string(credentialsId: creds.tenant, variable: 'TENANT_ID'),
+              string(credentialsId: creds.sub, variable: 'ARM_SUBSCRIPTION_ID')
+            ]) {
+              docker.image('hashicorp/terraform:1.9.5').inside('-v $WORKSPACE:/data') {
+                sh '''
+                  echo "🚀 Running Azure Terraform Plan"
+                  chmod +x /data/scripts/az-terraform.sh
+                  /data/scripts/az-terraform.sh /data ${CLIENT_ID} ${CLIENT_SECRET} ${ARM_SUBSCRIPTION_ID} ${TENANT_ID}
+                '''
+              }
+            }
+
+          } else if (cloudProvider == "aws") {
+            def creds = [
+              access: "aws_access_${environmentType}",
+              secret: "aws_secret_${environmentType}"
+            ]
+
+            withCredentials([
+              string(credentialsId: creds.access, variable: 'AWS_ACCESS_KEY_ID'),
+              string(credentialsId: creds.secret, variable: 'AWS_SECRET_ACCESS_KEY')
+            ]) {
+              docker.image('hashicorp/terraform:1.9.5').inside('-v $WORKSPACE:/data') {
+                sh '''
+                  echo "🚀 Running AWS Terraform Plan"
+                  chmod +x /data/scripts/aws-terraform.sh
+                  /data/scripts/aws-terraform.sh /data ${AWS_ACCESS_KEY_ID} ${AWS_SECRET_ACCESS_KEY}
+                '''
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
