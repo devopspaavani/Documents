@@ -1,0 +1,28 @@
+sh '''#!/bin/bash
+curl -s -u "${GIT_USERNAME}:${GIT_PASSWORD}" \
+  -H "Accept: application/vnd.github.v3+json" \
+  -X POST "${GIT_API_URL}/repos/${PR_REPO_FULL_NAME}/statuses/${PR_SHA}" \
+  -d "$(jq -nc --arg state "${state}" \
+                --arg target_url "${targetUrl}" \
+                --arg description "${description}" \
+                --arg context "Terraform Plan" \
+                '{state: $state, target_url: $target_url, description: $description, context: $context}')"
+'''
+
+
+
+def updateGitHubStatus(state, description) {
+    def targetUrl = env.BUILD_URL ?: "https://jenkins.yourdomain.com"
+    withCredentials([usernamePassword(credentialsId: 'git_token', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
+        sh """#!/bin/bash
+        curl -s -u "${GIT_USERNAME}:${GIT_PASSWORD}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          -X POST "${GIT_API_URL}/repos/${PR_REPO_FULL_NAME}/statuses/${PR_SHA}" \
+          -d "$(jq -nc --arg state "${state}" \
+                        --arg target_url "${targetUrl}" \
+                        --arg description "${description}" \
+                        --arg context "Terraform Plan" \
+                        '{state: $state, target_url: $target_url, description: $description, context: $context}')"
+        """
+    }
+}
