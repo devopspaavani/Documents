@@ -1,0 +1,33 @@
+def updateGitHubStatus(state, description) {
+    // Validate state
+    def validStates = ["pending", "success", "failure", "error"]
+    if (!validStates.contains(state)) {
+        error "❌ Invalid GitHub status '${state}'. Must be one of ${validStates.join(', ')}"
+    }
+
+    // Build Jenkins target link
+    def jenkinsBase = env.JENKINS_URL ?: "https://jenkins.cargill.com"
+    def jobPath = env.JOB_NAME?.replaceAll('/', '/job/') ?: "unknown"
+    def targetUrl = "${jenkinsBase}/job/${jobPath}/${env.BUILD_NUMBER ?: 'latest'}"
+
+    echo "Posting '${state}' status to GitHub for ${env.PR_REPO_FULL_NAME}"
+    echo "Target URL: ${targetUrl}"
+
+    withCredentials([usernamePassword(
+        credentialsId: 'ps590443_token',
+        usernameVariable: 'GIT_USERNAME',
+        passwordVariable: 'GIT_PASSWORD'
+    )]) {
+        sh """#!/bin/bash
+        set -e
+        curl -s -u "${GIT_USERNAME}:${GIT_PASSWORD}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          -X POST "${GIT_API_URL}/repos/${PR_REPO_FULL_NAME}/statuses/${PR_SHA}" \
+          -d "\$(jq -nc --arg state "${state}" \
+                        --arg target_url "${targetUrl}" \
+                        --arg description "${description}" \
+                        --arg context "Terraform Plan" \
+                        '{state: \$state, target_url: \$target_url, description: \$description, context: \$context}')"
+        """
+    }
+}
