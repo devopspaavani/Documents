@@ -1,0 +1,45 @@
+post {
+  success {
+    echo "✅ Terraform plan completed successfully."
+
+    withCredentials([string(credentialsId: 'github_token', variable: 'GITHUB_TOKEN')]) {
+      sh """
+        curl -s -X POST \
+          -H "Authorization: token ${GITHUB_TOKEN}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://git.abc.com/api/v3/repos/${PR_REPO_OWNER}/${PR_REPO_NAME}/statuses/${GIT_COMMIT} \
+          -d '{
+            "state": "success",
+            "target_url": "${BUILD_URL}",
+            "description": "Terraform plan succeeded",
+            "context": "Terraform Plan"
+          }'
+      """
+    }
+  }
+
+  failure {
+    echo "❌ Terraform plan failed."
+
+    withCredentials([string(credentialsId: 'github_token', variable: 'GITHUB_TOKEN')]) {
+      sh """
+        curl -s -X POST \
+          -H "Authorization: token ${GITHUB_TOKEN}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://git.abc.com/api/v3/repos/${PR_REPO_OWNER}/${PR_REPO_NAME}/statuses/${GIT_COMMIT} \
+          -d '{
+            "state": "failure",
+            "target_url": "${BUILD_URL}",
+            "description": "Terraform plan failed",
+            "context": "Terraform Plan"
+          }'
+      """
+    }
+  }
+
+  always {
+    echo "🧹 Cleaning up containers..."
+    containerStop("${CON_NAME}")
+    containerRemove("${CON_NAME}")
+  }
+}
