@@ -1,0 +1,72 @@
+def scriptFile = ""
+
+switch(cloudProvider) {
+    case "azure":
+        scriptFile = "/data/Scripts/azure-terraform-plan.sh"
+        break
+    case "aws":
+        scriptFile = "/data/Scripts/aws-terraform-plan.sh"
+        break
+    default:
+        error "❌ Unsupported cloud provider: ${cloudProvider}"
+}
+
+echo "✅ Selected Script: ${scriptFile}"
+
+
+
+=========
+
+
+def subscriptionId = ""
+
+if (cloudProvider == "azure") {
+    switch(envType) {
+        case "automated":
+            subscriptionId = env.AZURE_SUB_AUTOMATED
+            break
+        case "sandbox":
+            subscriptionId = env.AZURE_SUB_SANDBOX
+            break
+        case "reap":
+            subscriptionId = env.AZURE_SUB_REAP
+            break
+    }
+
+    if (!subscriptionId?.trim()) {
+        error "❌ Missing subscription ID for Azure environment: ${envType}"
+    }
+
+    echo "✅ Using Subscription: ${subscriptionId.take(8)}********"
+}
+
+
+
+
+------------------
+
+
+def repoName = env.PR_REPO_NAME?.toLowerCase() ?: ""
+
+def cloudProvider =
+       repoName.contains("azure") ? "azure" :
+       repoName.contains("aws")   ? "aws"   :
+       "unknown"
+
+if (cloudProvider == "unknown") {
+    error "❌ Could not determine cloud provider from repo name: ${repoName}"
+}
+
+def envType =
+       repoName.contains("automated") ? "automated" :
+       repoName.contains("sandbox")   ? "sandbox"   :
+       repoName.contains("reap")      ? "reap"      :
+       "unknown"
+
+if (envType == "unknown" && cloudProvider == "azure") {
+    error "❌ Could not determine Azure environment from repo name: ${repoName}"
+}
+
+echo "✅ Cloud Provider = ${cloudProvider}"
+echo "✅ Environment    = ${envType}"
+
