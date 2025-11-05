@@ -1,0 +1,59 @@
+#!/bin/bash
+set -euo pipefail
+
+# Arguments
+WORKDIR="$1"
+CLIENT_SECRET="$2"
+CLIENT_ID="$3"
+ARM_ACCESS_KEY="$4"
+PIPELINE_NAME="$5"
+PR_REPO_NAME="$6"
+PR_NUMBER="$7"
+LOG_HEADER="$8"
+ENV_TYPE="${9:-sandbox}"  # Optional arg: sandbox or automated
+TENANT_ID="11111111-1111-1111-1111-111111111111"
+
+# Choose Azure Subscription based on ENV_TYPE
+if [[ "$ENV_TYPE" == "automated" ]]; then
+  ARM_SUBSCRIPTION_ID="22222222-2222-2222-2222-222222222222"
+elif [[ "$ENV_TYPE" == "sandbox" ]]; then
+  ARM_SUBSCRIPTION_ID="11111111-1111-1111-1111-111111111111"
+else
+  echo "❌ Invalid ENV_TYPE: $ENV_TYPE. Expected 'sandbox' or 'automated'"
+  exit 1
+fi
+
+echo "********************************************************************"
+echo "🔹 Running Terraform Plan for: $ENV_TYPE"
+echo "🔹 Working Dir: $WORKDIR"
+echo "🔹 Repo: $PR_REPO_NAME"
+echo "🔹 PR: $PR_NUMBER"
+echo "********************************************************************"
+
+# Export Azure environment credentials
+export ARM_CLIENT_ID="$CLIENT_ID"
+export ARM_CLIENT_SECRET="$CLIENT_SECRET"
+export ARM_TENANT_ID="$TENANT_ID"
+export ARM_SUBSCRIPTION_ID="$ARM_SUBSCRIPTION_ID"
+export ARM_ACCESS_KEY="$ARM_ACCESS_KEY"
+
+# Terraform directory
+TF_DIR="${WORKDIR}/config/terraform"
+if [[ ! -d "$TF_DIR" ]]; then
+  echo "❌ ERROR: Terraform directory not found at $TF_DIR"
+  exit 1
+fi
+
+cd "$TF_DIR"
+echo "📂 Current dir: $(pwd)"
+
+# Terraform workflow
+echo "********************************************************************"
+echo "STARTED: Generating Terraform PLAN for $ENV_TYPE"
+echo "********************************************************************"
+
+terraform init -upgrade -backend-config="key=${PIPELINE_NAME}.tfstate" -no-color
+terraform fmt -recursive
+terraform plan -no-color -out=tfplan.out | tee plan.out
+
+echo "✅ Terraform plan completed for ${ENV_TYPE} environment."
